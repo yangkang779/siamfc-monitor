@@ -128,8 +128,8 @@ def _update_target_position(pos_x, pos_y, score, final_score_sz, tot_stride, sea
 def forward_samples(model, image, samples):
     extractor = RegionExtractor(image, samples, 127, 16, 256)
     for i, regions in enumerate(extractor):
-        regions = Variable(regions).cuda() #regions [128, 3, 107, 107]
-        feat = model.mid_feature(regions) #feat.shape 128*4608
+        regions = Variable(regions).cuda() #regions [1, 3, 107, 107]
+        feat = model.branch(regions) #feat.shape 128*4608
         feat = feat.view(feat.size(0), -1)
         if i == 0:
             feats = feat.data.clone()

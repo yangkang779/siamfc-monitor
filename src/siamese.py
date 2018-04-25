@@ -62,27 +62,21 @@ class SiameseNet(nn.Module):
         self.conv5 = nn.Sequential(
             nn.Conv2d(384, 32, 3, 1, groups=2),
         )
-        self.mid_feature = nn.Sequential(
+        # self.mid_feature = nn.Sequential(
+        #     self.conv1,
+        #     self.conv2,
+        #     self.conv3,
+        # )
+        self.branch = nn.Sequential(
             self.conv1,
             self.conv2,
             self.conv3,
-        )
-        self.branch = nn.Sequential(
-            # self.conv1,
-            # self.conv2,
-            # self.conv3,
             self.conv4,
             self.conv5
         )
+
         # make feature map channels dont change, and size (H*W) same the last layer size
         # conv4 output:[1, 384, 12, 12]--conv5--[1, 32, 6, 6]--transconv--[1, 32, 12, 12]
-
-        # self.trans_conv3 = nn.ConvTranspose2d(384, 384, 12, stride=1, bias=False)
-        # self.trans_conv3.weight.data = self.bilinear_kernel(384, 384, 12)
-        # self.trans_conv5 = nn.ConvTranspose2d(32, 32, 16, stride=1, bias=False)
-        # self.trans_conv5.weight.data = self.bilinear_kernel(32, 32, 16)
-
-        # self.con3_pool = nn.MaxPool2d(5, 1)
 
         self.bn_adjust = nn.BatchNorm2d(1)
         self.lrn = LRN()
@@ -94,17 +88,15 @@ class SiameseNet(nn.Module):
             for m in self.modules():
                 m.training = False
 
-    def forward(self, x):
+    def forward(self, z, x):
 
-        m = self.mid_feature(x)
-        x = self.branch(m)
-        # m = self.con3_pool(m)
-        # m = self.lrn(m)
-        # m = torch.chunk(m, 16, 1)
-        # x = torch.cat([m[0], x], 1)
-        # x = self.lrn(x)
+        x = self.branch(x)
+        z = self.branch(z)
 
-        return x
+        out = self.xcorr(z, x)
+        out = self.bn_adjust(out)
+
+        return out
 
     def xcorr(self, z, x):
         out = F.conv2d(x, z)
@@ -138,18 +130,19 @@ class SiameseNet(nn.Module):
         frame_padded_z, npad_z = pad_frame(image, image.size, pos_x, pos_y, z_sz, avg_chan)
         z_crops = extract_crops_z(frame_padded_z, npad_z, pos_x, pos_y, z_sz, design.exemplar_sz)
 
-        template_z = self.forward(Variable(z_crops)) # 1*32*17*17
-        return image, template_z
+        # template_z = self.branch(Variable(z_crops)) # 1*32*17*17
+        return image, z_crops
 
-    def get_scores(self, pos_x, pos_y, scaled_search_area, template_z, filename, design, final_score_sz):
+    def get_scores(self, pos_x, pos_y, scaled_search_area, z_crops, filename, design, final_score_sz):
         image = Image.open(filename)
         avg_chan = ImageStat.Stat(image).mean
         frame_padded_x, npad_x = pad_frame(image, image.size, pos_x, pos_y, scaled_search_area[2], avg_chan)
         x_crops = extract_crops_x(frame_padded_x, npad_x, pos_x, pos_y, scaled_search_area[0], scaled_search_area[1], scaled_search_area[2], design.search_sz)
 
-        template_x = self.forward(Variable(x_crops)) # 3*32*49*49
-        scores = self.xcorr(template_z, template_x)
-        scores = self.bn_adjust(scores) # 3*1*33*33
+        # template_x = self.forward(Variable(x_crops)) # 3*32*49*49
+        # scores = self.xcorr(template_z, template_x)
+        # scores = self.bn_adjust(scores) # 3*1*33*33
+        scores = self.forward(Variable(z_crops), Variable(x_crops))
         # TODO: any elegant alternator?
         scores = scores.squeeze().permute(1, 2, 0).cpu().data.numpy() # 33*33*3
         scores_up = cv2.resize(scores, (final_score_sz, final_score_sz))
